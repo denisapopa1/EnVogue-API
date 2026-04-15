@@ -18,13 +18,14 @@ namespace WardrobeApi.Controllers
         }
 
         [HttpPost("upload")]
+        [AllowAnonymous]
         public async Task<IActionResult> UploadImage(IFormFile file)
         {
             if (file == null || file.Length == 0)
                 return BadRequest("No file uploaded");
 
             var relativePath = _configuration["ImageStorage:LocalPath"] ?? "uploads/images";
-            var uploadPath = Path.Combine(_environment.WebRootPath ?? "wwwroot", relativePath);
+            var uploadPath = Path.Combine(_environment.WebRootPath, relativePath);
 
             if (!Directory.Exists(uploadPath))
             {
@@ -39,9 +40,7 @@ namespace WardrobeApi.Controllers
                 await file.CopyToAsync(stream);
             }
 
-            var fileUrl = Path.Combine(relativePath, fileName).Replace("\\", "/");
-
-            return Ok(new { message = "Image uploaded successfully", path = fileUrl });
+            return Ok(fileName);
         }
     }
 }

@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Authorization;
+﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
@@ -19,7 +19,15 @@ namespace WardrobeApi.Controllers
         {
             _context = context;
         }
+        [HttpGet("count")]
+        public async Task<IActionResult> GetCount()
+        {
+            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (userId == null) return Unauthorized();
 
+            var count = await _context.ClothingItems.CountAsync(i => i.UserId == userId);
+            return Ok(count);
+        }
         [HttpGet]
         public async Task<IActionResult> GetItems(
             [FromQuery] int? categoryId,
@@ -58,9 +66,9 @@ namespace WardrobeApi.Controllers
                 Id = i.Id,
                 Name = i.Name,
                 CategoryId = i.CategoryId,
-                CategoryName = i.Category != null ? i.Category.Name : null,
+                CategoryName = i.Category != null ? i.Category.Name : "Fără Categorie",
                 SubcategoryId = i.SubcategoryId,
-                SubcategoryName = i.Subcategory != null ? i.Subcategory.Name : null,
+                SubcategoryName = i.Subcategory != null ? i.Subcategory.Name : "Fără Subcategorie",
                 Season = i.Season,
                 Style = i.Style,
                 Color = i.Color,
@@ -126,7 +134,10 @@ namespace WardrobeApi.Controllers
 
             _context.ClothingItems.Add(item);
             await _context.SaveChangesAsync();
+            // ----------------------------------
 
+            // Acum că avem ID generat de DB, putem încărca referința
+            await _context.Entry(item).Reference(i => i.Category).LoadAsync();
             return CreatedAtAction(nameof(GetItem), new { id = item.Id }, item);
         }
 
@@ -164,5 +175,25 @@ namespace WardrobeApi.Controllers
             await _context.SaveChangesAsync();
             return NoContent();
         }
-    }
-}
+        // --- ADAUGĂ ACESTE METODE AICI (la finalul clasei) ---
+
+        [HttpGet("categories")]
+        [AllowAnonymous] // Permitem accesul pentru a încărca dropdown-urile chiar și înainte de login dacă e cazul
+        public async Task<IActionResult> GetCategories()
+        {
+            var categories = await _context.Categories.ToListAsync();
+            return Ok(categories);
+        }
+
+        [HttpGet("subcategories")]
+        [AllowAnonymous]
+        public async Task<IActionResult> GetSubcategories()
+        {
+            var subcategories = await _context.Subcategories.ToListAsync();
+            return Ok(subcategories);
+        }
+    } // Aceasta este ultima acoladă a clasei
+} // Aceasta este ultima acoladă a namespace-ului
+    
+
+

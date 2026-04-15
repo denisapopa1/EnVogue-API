@@ -1,18 +1,31 @@
-using System.Text;
-using Microsoft.AspNetCore.Authentication.JwtBearer;
+﻿using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.FileProviders;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
+using System.Text;
 using WardrobeApi.Data;
 using WardrobeApi.Models;
+using Microsoft.Extensions.FileProviders;
+using System.IO;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
+// Adaugă serviciul CORS pentru a permite accesul frontend-ului
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowBlazorOrigin",
+        policy => policy.WithOrigins("http://localhost:5202") // Portul din consola ta de frontend
+                          .AllowAnyMethod()
+                          .AllowAnyHeader()
+                          .AllowCredentials());
+});
 
+// Nu uita să pui app.UseCors("AllowBlazorOrigin") după app.UseHttpsRedirection()!
 // Configure DbContext with SQLite
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection") ?? "Data Source=Wardrobe.db";
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
@@ -86,38 +99,63 @@ builder.Services.AddSwaggerGen(c =>
 
 var app = builder.Build();
 
-// Migrate Database on startup
+// 1. Migrare și Seed (Baza de date)
 using (var scope = app.Services.CreateScope())
 {
     var services = scope.ServiceProvider;
-    var context = services.GetRequiredService<ApplicationDbContext>();
-    // Since we are using SQLite, we can simply ensure created.
-    // For migrations, use context.Database.Migrate();
-    context.Database.EnsureCreated();
-    
-    // Seed Default Users
-    await DbSeeder.SeedAsync(services);
+    try
+    {
+        var context = services.GetRequiredService<ApplicationDbContext>();
+        context.Database.EnsureCreated();
+        await DbSeeder.SeedAsync(services);
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Eroare la pornirea bazei de date: {ex.Message}");
+    }
 }
 
-// Configure the HTTP request pipeline.
+// 2. Configurare Swagger (Doar în Development)
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
     app.UseSwaggerUI(c =>
     {
         c.SwaggerEndpoint("/swagger/v1/swagger.json", "WardrobeApi v1");
-        c.RoutePrefix = string.Empty; // Set Swagger UI as the root page
+        c.RoutePrefix = string.Empty; // Swagger va fi pagina principală a API-ului
     });
 }
 
+// --- ORDINEA MIDDLEWARE-URILOR (FOARTE IMPORTANTĂ) ---
+
+// 3. Securitate de bază
 app.UseHttpsRedirection();
 
-// Enable Static Files (for images)
-app.UseStaticFiles();
+// 4. CORS - Trebuie să fie înainte de Static Files și Routing
+// Folosim politica ta specifică pentru Blazor
+app.UseCors("AllowBlazorOrigin");
+
+// 5. STATIC FILES - Aceasta este "magia" care repară pozele
+app.UseStaticFiles(); // Permite accesul la folderul wwwroot general
+
+// Configurăm accesul special pentru folderul de upload-uri
+// Ne asigurăm că serverul vede wwwroot/uploads/images
+string uploadsPath = Path.Combine(app.Environment.WebRootPath, "uploads");
+if (!Directory.Exists(uploadsPath)) Directory.CreateDirectory(uploadsPath);
+
+app.UseStaticFiles(new StaticFileOptions
+{
+    FileProvider = new PhysicalFileProvider(uploadsPath),
+    RequestPath = "/uploads"
+});
+
+// 6. Ruting și Securitate Token
+app.UseRouting();
 
 app.UseAuthentication();
 app.UseAuthorization();
 
+// 7. Mapare Controller-e
 app.MapControllers();
 
 app.Run();
