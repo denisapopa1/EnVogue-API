@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
 using WardrobeApi.Data;
+using WardrobeApi.DTOs;
 using WardrobeApi.Models;
 
 namespace WardrobeApi.Controllers
@@ -23,12 +24,65 @@ namespace WardrobeApi.Controllers
         public async Task<IActionResult> GenerateOutfit([FromQuery] string? color, [FromQuery] string? occasion)
         {
             var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (userId == null) return Unauthorized();
+
+            var selection = await SelectGeneratedOutfitItems(userId, color);
+            if (selection.ErrorMessage != null) return NotFound(selection.ErrorMessage);
+
+            var name = GetGeneratedOutfitName(occasion);
+            return Ok(BuildGeneratedOutfitResponse(name, occasion, selection.Items));
+        }
+
+        [HttpPost("generate")]
+        public async Task<IActionResult> GenerateAndSaveOutfit([FromQuery] string? color, [FromQuery] string? occasion)
+        {
+            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (userId == null) return Unauthorized();
+
+            var selection = await SelectGeneratedOutfitItems(userId, color);
+            if (selection.ErrorMessage != null) return NotFound(selection.ErrorMessage);
+
+            var outfit = new Outfit
+            {
+                Name = GetGeneratedOutfitName(occasion),
+                Occasion = occasion,
+                UserId = userId
+            };
+
+            foreach (var item in selection.Items)
+            {
+                outfit.OutfitClothingItems.Add(new OutfitClothingItem
+                {
+                    ClothingItemId = item.Id
+                });
+            }
+
+            _context.Outfits.Add(outfit);
+            await _context.SaveChangesAsync();
+
+            var dto = new OutfitDto
+            {
+                Id = outfit.Id,
+                Name = outfit.Name,
+                CreatedDate = outfit.CreatedDate,
+                IsFavorite = outfit.IsFavorite,
+                Occasion = outfit.Occasion,
+                ClothingItemIds = selection.Items.Select(i => i.Id).ToList(),
+                ClothingItems = selection.Items.Select(ToClothingItemDto).ToList()
+            };
+
+            return Created($"/api/outfits/{outfit.Id}", dto);
+        }
+
+        private async Task<(string? ErrorMessage, List<ClothingItem> Items)> SelectGeneratedOutfitItems(string userId, string? color)
+        {
             var items = await _context.ClothingItems
                 .Include(i => i.Category)
+                .Include(i => i.Subcategory)
                 .Where(i => i.UserId == userId)
                 .ToListAsync();
 
-            if (!items.Any()) return NotFound("No clothing items found to generate an outfit");
+            if (!items.Any()) return ("No clothing items found to generate an outfit", new List<ClothingItem>());
 
             // Simple logic for demonstration
             // 1. Filter by color if provided
@@ -51,18 +105,45 @@ namespace WardrobeApi.Controllers
             var top = tops.Any() ? tops[random.Next(tops.Count)] : null;
             var bottom = bottoms.Any() ? bottoms[random.Next(bottoms.Count)] : null;
 
-            if (top == null || bottom == null) return NotFound("Could not generate a complete outfit");
+            if (top == null || bottom == null) return ("Could not generate a complete outfit", new List<ClothingItem>());
 
-            return Ok(new
+            return (null, new List<ClothingItem> { top, bottom });
+        }
+
+        private static string GetGeneratedOutfitName(string? occasion)
+        {
+            return $"Generated {occasion ?? "Daily"} Outfit";
+        }
+
+        private static object BuildGeneratedOutfitResponse(string name, string? occasion, List<ClothingItem> items)
+        {
+            return new
             {
-                name = $"Generated {occasion ?? "Daily"} Outfit",
-                occasion = occasion,
-                items = new[] 
-                { 
-                    new { top.Id, top.Name, Category = top.Category?.Name },
-                    new { bottom.Id, bottom.Name, Category = bottom.Category?.Name }
-                }
-            });
+                name,
+                occasion,
+                clothingItemIds = items.Select(i => i.Id).ToList(),
+                items = items.Select(ToClothingItemDto).ToList()
+            };
+        }
+
+        private static ClothingItemDto ToClothingItemDto(ClothingItem item)
+        {
+            return new ClothingItemDto
+            {
+                Id = item.Id,
+                Name = item.Name,
+                CategoryId = item.CategoryId,
+                CategoryName = item.Category?.Name,
+                SubcategoryId = item.SubcategoryId,
+                SubcategoryName = item.Subcategory?.Name,
+                Season = item.Season,
+                Style = item.Style,
+                Color = item.Color,
+                Brand = item.Brand,
+                ImagePath = item.ImagePath,
+                Tags = item.Tags,
+                IsFavorite = item.IsFavorite
+            };
         }
     }
 }

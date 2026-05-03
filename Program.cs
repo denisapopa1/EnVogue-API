@@ -1,9 +1,9 @@
 ﻿using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.FileProviders;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
+using System.Security.Claims;
 using System.Text;
 using WardrobeApi.Data;
 using WardrobeApi.Models;
@@ -11,18 +11,47 @@ using Microsoft.Extensions.FileProviders;
 using System.IO;
 
 var builder = WebApplication.CreateBuilder(args);
+var authDebugLogPath = Path.Combine(builder.Environment.ContentRootPath, "auth-debug.log");
+
+void WriteAuthDebug(string message)
+{
+    try
+    {
+        File.AppendAllText(authDebugLogPath, $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] {message}{Environment.NewLine}");
+    }
+    catch
+    {
+        // Best-effort local debug logging for development only.
+    }
+}
+
+if (builder.Environment.IsDevelopment())
+{
+    WriteAuthDebug("----- Application startup -----");
+}
 
 // Add services to the container.
 builder.Services.AddControllers();
+builder.Services.AddScoped<DemoDatasetSeeder>();
 builder.Services.AddEndpointsApiExplorer();
 // Adaugă serviciul CORS pentru a permite accesul frontend-ului
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowBlazorOrigin",
-        policy => policy.WithOrigins("http://localhost:5202") // Portul din consola ta de frontend
-                          .AllowAnyMethod()
-                          .AllowAnyHeader()
-                          .AllowCredentials());
+        policy => policy
+            .SetIsOriginAllowed(origin =>
+            {
+                if (!Uri.TryCreate(origin, UriKind.Absolute, out var uri))
+                {
+                    return false;
+                }
+
+                return string.Equals(uri.Host, "localhost", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(uri.Host, "127.0.0.1", StringComparison.OrdinalIgnoreCase);
+            })
+            .AllowAnyMethod()
+            .AllowAnyHeader()
+            .AllowCredentials());
 });
 
 // Nu uita să pui app.UseCors("AllowBlazorOrigin") după app.UseHttpsRedirection()!
@@ -66,6 +95,29 @@ builder.Services.AddAuthentication(options =>
         IssuerSigningKey = new SymmetricSecurityKey(keyBytes),
         ClockSkew = TimeSpan.Zero // Remove delay for token expiration
     };
+
+    if (builder.Environment.IsDevelopment())
+    {
+        options.Events = new JwtBearerEvents
+        {
+            OnMessageReceived = context =>
+            {
+                var hasAuthorization = context.Request.Headers.ContainsKey("Authorization");
+                WriteAuthDebug($"JWT message received for {context.Request.Method} {context.Request.Path}. Authorization header present: {hasAuthorization}");
+                return Task.CompletedTask;
+            },
+            OnAuthenticationFailed = context =>
+            {
+                WriteAuthDebug($"JWT authentication failed for {context.Request.Method} {context.Request.Path}: {context.Exception.Message}");
+                return Task.CompletedTask;
+            },
+            OnChallenge = context =>
+            {
+                WriteAuthDebug($"JWT challenge for {context.Request.Method} {context.Request.Path}. Error: {context.Error}; Description: {context.ErrorDescription}");
+                return Task.CompletedTask;
+            }
+        };
+    }
 });
 
 // Configure Swagger to use JWT
@@ -107,6 +159,7 @@ using (var scope = app.Services.CreateScope())
     {
         var context = services.GetRequiredService<ApplicationDbContext>();
         context.Database.EnsureCreated();
+        await DbSchemaUpdater.EnsureUserProfilesTableAsync(context);
         await DbSeeder.SeedAsync(services);
     }
     catch (Exception ex)
@@ -129,13 +182,14 @@ if (app.Environment.IsDevelopment())
 // --- ORDINEA MIDDLEWARE-URILOR (FOARTE IMPORTANTĂ) ---
 
 // 3. Securitate de bază
-app.UseHttpsRedirection();
+// In development, the frontend often calls the HTTP endpoint directly.
+// Redirecting to HTTPS changes the origin/port and can drop Authorization on browser redirects.
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHttpsRedirection();
+}
 
-// 4. CORS - Trebuie să fie înainte de Static Files și Routing
-// Folosim politica ta specifică pentru Blazor
-app.UseCors("AllowBlazorOrigin");
-
-// 5. STATIC FILES - Aceasta este "magia" care repară pozele
+// 4. STATIC FILES - Aceasta este "magia" care repară pozele
 app.UseStaticFiles(); // Permite accesul la folderul wwwroot general
 
 // Configurăm accesul special pentru folderul de upload-uri
@@ -149,13 +203,35 @@ app.UseStaticFiles(new StaticFileOptions
     RequestPath = "/uploads"
 });
 
-// 6. Ruting și Securitate Token
+// 5. Ruting și Securitate Token
 app.UseRouting();
+
+app.UseCors("AllowBlazorOrigin");
+
+if (app.Environment.IsDevelopment())
+{
+    app.Use(async (context, next) =>
+    {
+        if (context.Request.Path.StartsWithSegments("/api"))
+        {
+            var hasAuthorization = context.Request.Headers.ContainsKey("Authorization");
+            WriteAuthDebug($"Incoming {context.Request.Method} {context.Request.Path}. Authorization header present: {hasAuthorization}");
+        }
+
+        await next();
+
+        if (context.Request.Path.StartsWithSegments("/api"))
+        {
+            var userId = context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? "(null)";
+            WriteAuthDebug($"Completed {context.Request.Method} {context.Request.Path} with {context.Response.StatusCode}. UserId: {userId}");
+        }
+    });
+}
 
 app.UseAuthentication();
 app.UseAuthorization();
 
-// 7. Mapare Controller-e
+// 6. Mapare Controller-e
 app.MapControllers();
 
 app.Run();

@@ -11,6 +11,7 @@ namespace WardrobeApi.DTOs
         public bool IsFavorite { get; set; }
         public string? Occasion { get; set; }
         public List<int> ClothingItemIds { get; set; } = new List<int>();
+        public List<ClothingItemDto> ClothingItems { get; set; } = new List<ClothingItemDto>();
     }
 
     public class CreateOutfitDto
@@ -18,5 +19,10 @@ namespace WardrobeApi.DTOs
         public string Name { get; set; } = string.Empty;
         public string? Occasion { get; set; }
         public List<int> ClothingItemIds { get; set; } = new List<int>();
+    }
+
+    public class UpdateOutfitDto : CreateOutfitDto
+    {
+        public bool? IsFavorite { get; set; }
     }
 }

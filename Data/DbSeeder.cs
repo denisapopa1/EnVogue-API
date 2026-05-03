@@ -13,45 +13,7 @@ namespace WardrobeApi.Data
             var userManager = serviceProvider.GetRequiredService<UserManager<ApplicationUser>>();
 
             // 1. Seed Categories and Subcategories
-            if (!await context.Categories.AnyAsync())
-            {
-                var categories = new List<Category>
-                {
-                    new Category { Name = "Tops", Subcategories = new List<Subcategory> 
-                        { 
-                            new Subcategory { Name = "T-Shirts" }, 
-                            new Subcategory { Name = "Shirts" }, 
-                            new Subcategory { Name = "Sweaters" },
-                            new Subcategory { Name = "Jackets" }
-                        } 
-                    },
-                    new Category { Name = "Bottoms", Subcategories = new List<Subcategory> 
-                        { 
-                            new Subcategory { Name = "Jeans" }, 
-                            new Subcategory { Name = "Trousers" }, 
-                            new Subcategory { Name = "Shorts" },
-                            new Subcategory { Name = "Skirts" }
-                        } 
-                    },
-                    new Category { Name = "Footwear", Subcategories = new List<Subcategory> 
-                        { 
-                            new Subcategory { Name = "Sneakers" }, 
-                            new Subcategory { Name = "Boots" }, 
-                            new Subcategory { Name = "Sandals" }
-                        } 
-                    },
-                    new Category { Name = "Accessories", Subcategories = new List<Subcategory> 
-                        { 
-                            new Subcategory { Name = "Hats" }, 
-                            new Subcategory { Name = "Belts" }, 
-                            new Subcategory { Name = "Watches" }
-                        } 
-                    }
-                };
-
-                context.Categories.AddRange(categories);
-                await context.SaveChangesAsync();
-            }
+            await EnsureWardrobeTaxonomyAsync(context);
 
             // 2. Seed Default Users
             string password = "DefaultPassword123!";
@@ -71,6 +33,49 @@ namespace WardrobeApi.Data
                     await userManager.CreateAsync(user, password);
                 }
             }
+        }
+
+        public static async Task EnsureWardrobeTaxonomyAsync(ApplicationDbContext context)
+        {
+            var taxonomy = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["Tops"] = new[] { "T-shirt", "Blouse", "Sweater", "Hoodie" },
+                ["Bottoms"] = new[] { "Jeans", "Trousers", "Skirt", "Shorts" },
+                ["Dress"] = new[] { "Mini", "Maxi", "Cocktail", "Evening" },
+                ["Outerwear"] = new[] { "Jacket", "Coat", "Blazer", "Vest" },
+                ["Shoes"] = new[] { "Sneakers", "Boots", "Heels", "Sandals" },
+                ["Accessories"] = new[] { "Scarf", "Belt", "Jewelry", "Hat" }
+            };
+
+            var categories = await context.Categories
+                .Include(category => category.Subcategories)
+                .ToListAsync();
+
+            foreach (var categoryDefinition in taxonomy)
+            {
+                var category = categories.FirstOrDefault(item =>
+                    string.Equals(item.Name, categoryDefinition.Key, StringComparison.OrdinalIgnoreCase));
+
+                if (category == null)
+                {
+                    category = new Category { Name = categoryDefinition.Key };
+                    context.Categories.Add(category);
+                    categories.Add(category);
+                }
+
+                foreach (var subcategoryName in categoryDefinition.Value)
+                {
+                    var hasSubcategory = category.Subcategories.Any(item =>
+                        string.Equals(item.Name, subcategoryName, StringComparison.OrdinalIgnoreCase));
+
+                    if (!hasSubcategory)
+                    {
+                        category.Subcategories.Add(new Subcategory { Name = subcategoryName });
+                    }
+                }
+            }
+
+            await context.SaveChangesAsync();
         }
     }
 }

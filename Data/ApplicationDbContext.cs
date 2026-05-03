@@ -16,6 +16,7 @@ namespace WardrobeApi.Data
         public DbSet<OutfitClothingItem> OutfitClothingItems { get; set; }
         public DbSet<Category> Categories { get; set; }
         public DbSet<Subcategory> Subcategories { get; set; }
+        public DbSet<UserProfile> UserProfiles { get; set; }
 
         protected override void OnModelCreating(ModelBuilder builder)
         {
@@ -33,6 +34,12 @@ namespace WardrobeApi.Data
                 .HasOne(oci => oci.ClothingItem)
                 .WithMany()
                 .HasForeignKey(oci => oci.ClothingItemId);
+
+            builder.Entity<UserProfile>()
+                .HasOne(up => up.User)
+                .WithOne()
+                .HasForeignKey<UserProfile>(up => up.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
         }
     }
 }
