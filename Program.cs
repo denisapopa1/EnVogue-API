@@ -32,6 +32,7 @@ if (builder.Environment.IsDevelopment())
 
 // Add services to the container.
 builder.Services.AddControllers();
+builder.Services.AddHttpClient<WardrobeApi.Controllers.OutfitGeneratorController>();
 builder.Services.AddScoped<DemoDatasetSeeder>();
 builder.Services.AddEndpointsApiExplorer();
 // Adaugă serviciul CORS pentru a permite accesul frontend-ului
@@ -47,7 +48,10 @@ builder.Services.AddCors(options =>
                 }
 
                 return string.Equals(uri.Host, "localhost", StringComparison.OrdinalIgnoreCase)
-                    || string.Equals(uri.Host, "127.0.0.1", StringComparison.OrdinalIgnoreCase);
+                    || string.Equals(uri.Host, "127.0.0.1", StringComparison.OrdinalIgnoreCase)
+                    || System.Net.IPAddress.TryParse(uri.Host, out var ipAddress)
+                        && (ipAddress.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork
+                            || ipAddress.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6);
             })
             .AllowAnyMethod()
             .AllowAnyHeader()
